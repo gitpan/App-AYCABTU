@@ -10,7 +10,7 @@ my $DEFAULT = '0.00';
 
 use vars qw($VERSION @ISA);
 BEGIN {
-    $VERSION = '0.10';
+    $VERSION = '0.11';
     @ISA     = 'Module::Install::Base';
 }
 
@@ -64,7 +64,7 @@ sub _get_git_tag_version {
 
 sub _report {
     my $self = shift;
-    print "version_check found: @_\n";
+    print "version_check @_\n";
 }
 
 1;
