@@ -2,7 +2,7 @@ package App::AYCABTU;
 use App::AYCABTU::OO -base;
 use 5.008003;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use Getopt::Long;
 use YAML::XS;
@@ -11,56 +11,103 @@ use Capture::Tiny 'capture';
 has config => [];
 
 has file => 'AYCABTU';
-has action => 'update';
+has action => 'list';
+has show => '';
 has tags => [];
 has names => [];
 has all => 0;
+has quiet => 0;
+has verbose => 0;
 has args => [];
 
 has repos => [];
+
+my ($prefix, $error, $quiet, $normal, $verbose);
 
 sub run {
     my $self = shift;
     $self->get_options(@_);
     $self->read_config();
     $self->select_repos();
+    if (not @{$self->repos}) {
+        print "No repositories selected. Try --all.\n";
+        return;
+    }
     my $action = $self->action;
     my $method = "action_$action";
-    print "Can't perform action '$action'\n" && return
+    die "Can't perform action '$action'\n"
         unless $self->can($method);
     for my $entry (@{$self->repos}) {
+        ($prefix, $error, $quiet, $normal, $verbose) = ('') x 5;
         $self->$method($entry);
+        $verbose ||= $normal;
+        $normal ||= $quiet;
+        my $msg =
+            $error ? $error :
+            $self->verbose ? $verbose :
+            $self->quiet ? $quiet :
+            $normal;
+        $msg = "$prefix$msg\n" if $msg;
+        print $msg;
     }
 }
 
 sub get_options {
     my $self = shift;
     GetOptions(
-        "update" => sub { $self->action('update') },
-        "status" => sub { $self->action('status') },
-        "list" => sub { $self->action('list') },
-        "file=s" => sub { $self->file($_[1]) },
-        "tags=s" => sub {
+        'file=s' => sub { $self->file($_[1]) },
+        'verbose' => sub { $self->verbose(1) },
+        'quiet' => sub { $self->quiet(1) },
+        'list' => sub { $self->action('list') },
+        'update' => sub { $self->action('update') },
+        'status' => sub { $self->action('status') },
+        'show=s' => sub { $self->action('show'); $self->show($_[1]) },
+        'all' => sub { $self->all(1) },
+        'tags=s' => sub {
             my $tags = $_[1] or return;
             push @{$self->tags}, [split ',', $tags];
         },
-        "all" => sub { $self->all(1) },
-        "help" => \&help,
+        'help' => \&help,
     );
-    my $names = [
-        map {
-            s!/$!!;
-            $_;
-        } @ARGV
-    ];
+    no warnings;
+    my $names;
+    if (1 or not -t stdin) {
+        $names = [
+            map {
+                s!/$!!;
+                if (/^(\d+)-(\d+)?$/) {
+                    ($1..$2);
+                }
+                else {
+                    ($_);
+                }
+            } @ARGV
+        ];
+    }
+    else {
+        $names = [ split /\s+/, do {local $/; <stdin>} ]
+    }
     $self->names($names);
-    print "Can't locate aybabtu config file '${\ $self->file}'. Use --file=... option\n" and exit
-        if not -e $self->file;
+    die "Can't locate aybabtu config file '${\ $self->file}'. Use --file=... option\n"
+        if not -e $self->file and not @{[glob $self->file . '*']};
+}
+
+sub read_yaml {
+    my $self = shift;
+    my @files = glob($self->file . '*');
+    my $yaml = '';
+    local $/;
+    for my $file (@files) {
+        open Y, $file;
+        $yaml .= <Y>;
+    }
+    return $yaml;
 }
 
 sub read_config {
     my $self = shift;
-    my $config = YAML::XS::LoadFile($self->file);
+    my $yaml = $self->read_yaml();
+    my $config = YAML::XS::Load($yaml);
     $self->config($config);
     die $self->file . " must be a YAML sequence of mapping"
         if (ref($config) ne 'ARRAY') or grep {
@@ -74,19 +121,36 @@ sub read_config {
         $entry->{_num} = $count++;
 
         $entry->{name} ||= '';
-        if ($repo =~ /.*\/(.*).git$/) {
-            $entry->{name} = $1;
+        if (not $entry->{name} and $repo =~ /.*\/(.*).git$/) {
+            my $name = $1;
+            # XXX This should be configable.
+            $name =~ s/\.wiki$/-wiki/;
+            $entry->{name} = $name;
         }
 
-        $entry->{type} ||= '';
-        if ($repo =~ /\.git$/) {
-            $entry->{type} = 'git';
-        }
-        elsif ($repo =~ /svn/) {
-            $entry->{type} = 'svn';
-        }
+        my $type = $entry->{type}  || '';
+        $type ||=
+            ($repo =~ /\.git$/) ? 'git' :
+            ($repo =~ /svn/) ? 'svn' :
+            '';
+        $entry->{type} = $type;
 
-        $entry->{tags} ||= '';
+        my $tags = $entry->{tags} || '';
+
+        my $set = $tags ? { map {($_, 1)} split /[\s\,]+/, $tags } : {};
+        my $str = $repo;
+        $str =~ s/\/$//;
+        $str =~ s/\/trunk$//;
+        $str =~ s/.*\///;
+        my $subst = {
+            py => 'python',
+            pm => 'perl',
+        };
+        $set->{$_} = 1 for map {$subst->{$_} || $_} split /[^\w]+/, $str;
+        $set->{$type} = 1;
+        delete $set->{''};
+
+        $entry->{tags} = [ sort map lc, keys %$set ];
     }
 }
 
@@ -108,15 +172,19 @@ OUTER:
             push @$repos, $entry;
             next;
         }
+        my ($num, $name) = @{$entry}{qw(_num name)};
         if (@$names) {
-            if (grep {$_ eq $entry->{name}} @$names) {
+            if (grep {$_ eq $name or $_ eq $num} @$names) {
                 push @$repos, $entry;
                 next;
             }
         }
         for my $tags (@{$self->tags}) {
             if ($tags) {
-                my $count = scalar grep {$entry->{tags} =~ /\b$_\b/} @$tags;
+                my $count = scalar grep {
+                    my $t = $_;
+                    grep {$_ eq $t} @{$entry->{tags}};
+                } @$tags;
                 if ($count == @$tags) {
                     push @$repos, $entry;
                     next OUTER;
@@ -129,16 +197,74 @@ OUTER:
 sub action_update {
     my $self = shift;
     my $entry = shift;
-    my ($repo, $name, $type) = @{$entry}{qw(repo name type)};
-    print "Can't update $repo. No name.\n" && return
-        unless $name;
-    print "Can't update $name. Unknown type.\n" && return
-        unless $type;
-    print "Can't update $name. Type $type not yet supported.\n" && return
-        unless $type eq 'git';
-    print "Updating $name... ";
+    $self->_check(update => $entry) or return;
+    my ($num, $name) = @{$entry}{qw(_num name)};
+    $prefix = "$num) Updating $name... ";
     $self->git_update($entry);
-    print "\n";
+}
+
+sub action_status {
+    my $self = shift;
+    my $entry = shift;
+    $self->_check('check status' => $entry) or return;
+    my ($num, $name) = @{$entry}{qw(_num name)};
+    $prefix = "$num) Status for $name... ";
+    $self->git_status($entry);
+}
+
+sub action_list {
+    my $self = shift;
+    my $entry = shift;
+    my ($num, $repo, $name, $type, $tags) = @{$entry}{qw(_num repo name type tags)};
+    $prefix = "$num) ";
+    $quiet = $name;
+    $normal = sprintf " %-25s %-4s %-50s", $name, $type, $repo;
+    $verbose = "$normal\n    tags: @$tags";
+}
+
+sub action_show {
+    my $self = shift;
+    my $entry = shift;
+    my $show = $self->show;
+    $prefix = '';
+    if ($show =~ /^(nums?|numbers?)$/) {
+        $quiet = $entry->{_num};
+    }
+    elsif ($show =~ /^names?$/) {
+        $quiet = $entry->{name};
+    }
+    elsif ($show =~ /^tags?$/) {
+        my $set = {};
+        for my $repo (@{$self->repos}) {
+            $set->{$_} = 1 for @{$repo->{tags}};
+        }
+        my @tags = sort keys %$set;
+        print "@tags\n";
+        exit;
+    }
+    else {
+        $error = "Invalid type '$show' to show.";
+    }
+}
+
+sub _check {
+    my $self = shift;
+    my $action = shift;
+    my $entry = shift;
+    my ($num, $repo, $name, $type) = @{$entry}{qw(_num repo name type)};
+    if (not $name) {
+        $error = "Can't $action $repo. No name.";
+        return;
+    }
+    if (not $type) {
+        $error = "Can't $action $name. Unknown type.";
+        return;
+    }
+    if ($type ne 'git') {
+        $error = "Can't $action $name. Type $type not yet supported.";
+        return;
+    }
+    return 1;
 }
 
 sub git_update {
@@ -148,54 +274,86 @@ sub git_update {
     if (not -d $name) {
         my $cmd = "git clone $repo $name";
         my ($o, $e) = capture { system($cmd) };
-        print $o, $e if $e =~ /\S/;
-        print "Done";
+        if ($e =~ /\S/) {
+            $quiet = 'Error';
+            $verbose = "\n$o$e";
+        }
+        else {
+            $normal = 'Done';
+        }
     }
     elsif (-d "$name/.git") {
         my ($o, $e) = capture { system("cd $name; git pull") };
-        print $o, $e unless $o eq "Already up-to-date.\n";
-        print "Done";
+        if ($o eq "Already up-to-date.\n") {
+            $normal = "Already up to date";
+        }
+        else {
+            $quiet = "Updated";
+            $verbose = "\n$o$e";
+        }
     }
     else {
-        print "Skipped";
+        $quiet = "Skipped";
     }
 }
 
-sub action_status {
+sub git_status {
     my $self = shift;
     my $entry = shift;
-    print "Action 'status' not yet implemented";
-}
-
-sub action_list {
-    my $self = shift;
-    my $entry = shift;
-    my ($num, $repo, $name, $type, $tags) = @{$entry}{qw(_num repo name type $tags)};
-    printf "%3d) %-25s %-4s %-50s\n", $num, $name, $type, $repo;
-    print "     tags: $tags\n" if $tags;
+    my ($repo, $name) = @{$entry}{qw(repo name)};
+    if (not -d $name) {
+        $error = "No local repository";
+    }
+    elsif (-d "$name/.git") {
+        my ($o, $e) = capture { system("cd $name; git status") };
+        if ($o =~ /^nothing to commit/m and
+            not $e
+        ) {
+            if ($o =~ /Your branch is ahead .* by (\d+) /) {
+                $quiet = "Ahead by $1";
+                $verbose = "\n$o$e";
+            }
+            else {
+                $normal = "OK";
+            }
+        }
+        else {
+            $quiet = "Dirty";
+            $verbose = "\n$o$e";
+        }
+    }
+    else {
+        $quiet= "Skipped";
+    }
 }
 
 sub help {
     print <<'...';
 Usage:
-    aycabtu [ options ] [ names ]
+    aycabtu [ options ] action selectors
     
 Options:
-    --file=file         # aycabtu config file. Default: 'AYCABTU'
+    --file=file     # aycabtu config file. Default: 'AYCABTU'
+    --verbose       # Show more information
+    --quiet         # Show less information
 
-    [--update | --status | --list]   # Action. Default: 'update'
-        update          # Checkout or update the selected repos
-        status          # Get status info on the selected repos
-        list            # List the selected repos
+Action:
+    --list          # List the selected repos (default action)
+    --update        # Checkout or update the selected repos
+    --status        # Get status info on the selected repos
+    --show=aspect   # Show some aspect of the selected repos
 
-    --all               # Use all the repos in the config file
-    --tags=tags         # Select repos matching all the tags
-                        # Option can be used more than once
+Show Aspects:
+    numbers         # Show the numbers of the selected repos
+    names           # Show the numbers of the selected repos
+    tags            # Show ALL tags of selected repos
 
-Names:
-
-    A list of the names to to select. You can use multiple names and
-    file globbing, like this:
+Selector:
+    --all           # Use all the repos in the config file
+    --tags=tags     # Select repos matching all the tags
+                      Can be used more than once
+    names           # A list of the names to to select. You can use
+                    # multiple names and file globbing, like this:
 
         aycabtu --update foo-repo bar-*-repo
 
