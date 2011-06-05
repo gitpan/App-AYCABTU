@@ -1,35 +1,38 @@
 package App::AYCABTU;
-use App::AYCABTU::OO -base;
 use 5.008003;
+use Mouse 0.93;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 use Getopt::Long;
-use YAML::XS;
-use Capture::Tiny 'capture';
+use YAML::XS 0.35;
+use Capture::Tiny 0.10 'capture';
 
-has config => [];
+has config => (is => 'ro', default => sub{[]});
 
-has file => 'AYCABTU';
-has action => 'list';
-has show => '';
-has tags => [];
-has names => [];
-has all => 0;
-has quiet => 0;
-has verbose => 0;
-has args => [];
+has file => (is => 'ro', default => 'AYCABTU');
+has action => (is => 'ro', default => 'list');
+has show => (is => 'ro', default => '');
+has tags => (is => 'ro', default => sub{[]});
+has names => (is => 'ro', default => sub{[]});
+has all => (is => 'ro', default => 0);
+has quiet => (is => 'ro', default => 0);
+has verbose => (is => 'ro', default => 0);
+has args => (is => 'ro', default => sub{[]});
 
-has repos => [];
+has repos => (is => 'ro', default => sub{[]});
 
 my ($prefix, $error, $quiet, $normal, $verbose);
 
 sub run {
     my $self = shift;
-    $self->get_options(@_);
+    my @opts = @_
+        ? @_
+        : split /\s+/, ($ENV{AYCABTU_DEFAULT_OPTS} || '');
+    $self->get_options(@opts);
     $self->read_config();
     $self->select_repos();
-    if (not @{$self->repos}) {
+    if (not @{$self->repos} and not @{$self->names}) {
         print "No repositories selected. Try --all.\n";
         return;
     }
@@ -50,10 +53,14 @@ sub run {
         $msg = "$prefix$msg\n" if $msg;
         print $msg;
     }
+    if (@{$self->names}) {
+        warn "The following names were not found: @{$self->names}\n";
+    }
 }
 
 sub get_options {
     my $self = shift;
+    local @ARGV = @_;
     GetOptions(
         'file=s' => sub { $self->file($_[1]) },
         'verbose' => sub { $self->verbose(1) },
@@ -75,12 +82,10 @@ sub get_options {
         $names = [
             map {
                 s!/$!!;
-                if (/^(\d+)-(\d+)?$/) {
-                    ($1..$2);
-                }
-                else {
-                    ($_);
-                }
+                /^(\d+)-(\d+)?$/ ? ($1..$2) :
+                /^(\d+)$/ ? ($1) :
+                (-d) ? ($_) :
+                ();
             } @ARGV
         ];
     }
@@ -176,6 +181,7 @@ OUTER:
         if (@$names) {
             if (grep {$_ eq $name or $_ eq $num} @$names) {
                 push @$repos, $entry;
+                @$names = grep {$_ !~ /^(\Q$name\E|$num)$/} @$names;
                 next;
             }
         }
@@ -283,9 +289,13 @@ sub git_update {
         }
     }
     elsif (-d "$name/.git") {
-        my ($o, $e) = capture { system("cd $name; git pull") };
+        my ($o, $e) = capture { system("cd $name; git pull origin master") };
         if ($o eq "Already up-to-date.\n") {
             $normal = "Already up to date";
+        }
+        elsif ($e) {
+            $quiet = "Failed";
+            $verbose = "\n$o$e";
         }
         else {
             $quiet = "Updated";

@@ -7,22 +7,23 @@ build_requires:
 configure_requires:
   ExtUtils::MakeMaker: 6.42
 distribution_type: module
-generated_by: 'Module::Install version 1.00'
+generated_by: 'Module::Install version 1.01'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
   version: 1.4
+module_name: App::AYCABTU
 name: App-AYCABTU
 no_index:
   directory:
     - inc
     - t
 requires:
-  Capture::Tiny: 0
-  Getopt::Long: 0
-  YAML::XS: 0
+  Capture::Tiny: 0.10
+  Mouse: 0.93
+  YAML::XS: 0.35
   perl: 5.8.3
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/ingydotnet/app-aycabtu-pm.git
-version: 0.03
+version: 0.04
