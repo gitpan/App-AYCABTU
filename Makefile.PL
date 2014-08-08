@@ -26,7 +26,7 @@ my %WriteMakefileArgs = (
     "Mouse" => "0.93",
     "YAML::XS" => "0.35"
   },
-  "VERSION" => "0.06",
+  "VERSION" => "0.07",
   "test" => {
     "TESTS" => "t/*.t"
   }
