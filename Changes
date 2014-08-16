@@ -1,3 +1,6 @@
+0.09 Fri Aug 15 18:02:47 PDT 2014
+ - Remove t/_
+
 0.08 Fri Aug 15 15:39:33 PDT 2014
  - Add t/000-compile-modules.t
  - CPAN Day 2014 - 21 Release Salute!

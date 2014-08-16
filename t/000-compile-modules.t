@@ -7,8 +7,13 @@ sub test {
     -f and /\.pm$/ or return;
     s{^lib[/\\]}{};
     s{\.pm$}{};
-    s{[/\\]}{::};
-    use_ok $_;
+    s{[/\\]}{::}g;
+    if (/^(?:Alt::|Sex$)/) {
+        ok eval("require $_; 1"), "require $_; # OK";
+    }
+    else {
+        use_ok $_;
+    }
 }
 
 find {
