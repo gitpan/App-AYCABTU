@@ -10,4 +10,5 @@ README
 bin/aycabtu
 lib/App/AYCABTU.pm
 lib/App/AYCABTU.pod
+t/000-compile-modules.t
 t/release-pod-syntax.t

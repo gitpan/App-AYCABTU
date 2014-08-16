@@ -27,4 +27,4 @@ resources:
   bugtracker: https://github.com/ingydotnet/app-aycabtu-pm/issues
   homepage: https://github.com/ingydotnet/app-aycabtu-pm
   repository: https://github.com/ingydotnet/app-aycabtu-pm.git
-version: '0.12'
+version: '0.13'
